@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DataForge AI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{background:#0a0a0b;color:#e4e4e7;font-family:system-ui,sans-serif}</style>
+</head>
+<body class="min-h-screen">
+<header class="border-b border-zinc-800 sticky top-0 bg-[#0a0a0b]/90 backdrop-blur z-50">
+  <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-3 cursor-pointer" onclick="showHome()">
+      <div class="w-8 h-8 rounded-lg bg-orange-500 flex items-center justify-center font-bold text-black text-sm">DF</div>
+      <span class="font-semibold">DataForge <span class="text-orange-500">AI</span></span>
+    </div>
+    <nav class="flex gap-2 text-sm">
+      <button onclick="showHome()" class="px-3 py-1.5 rounded-md text-zinc-400 hover:text-white">Prompt</button>
+      <button onclick="loadHistory()" class="px-3 py-1.5 rounded-md text-zinc-400 hover:text-white">History</button>
+    </nav>
+  </div>
+</header>
+<main class="max-w-6xl mx-auto px-4 py-8" id="app"></main>
+<footer class="border-t border-zinc-900 py-4 text-center text-xs text-zinc-600">DataForge AI · Hackathon MVP · Source-backed · Compliance by design</footer>
+<script>
+const examples = [
+  "Collect all Senior Data Engineer openings in Bengaluru posted this week across permitted job boards.",
+  "Find 15 mid-size SaaS companies in India that raised funding in the last 6 months, with founder LinkedIn and company email.",
+  "Find companies that sponsored fintech conferences in the last year, with contact details."
+];
+let plan=null, task=null, records=[];
+function showHome(){
+  document.getElementById('app').innerHTML=`
+  <div class="max-w-3xl mx-auto space-y-8">
+    <div class="text-center space-y-3">
+      <h1 class="text-3xl font-bold">Describe what data you need</h1>
+      <p class="text-zinc-400">Prompt → autonomous source-backed dataset. Zero custom scrapers.</p>
+    </div>
+    <div class="bg-[#141416] border border-zinc-800 rounded-2xl p-1">
+      <textarea id="prompt" rows="4" class="w-full bg-transparent px-4 py-3 resize-none focus:outline-none" placeholder="e.g. Find SaaS companies in India that raised funding..."></textarea>
+      <div class="flex justify-between px-3 pb-2">
+        <span class="text-xs text-zinc-600">Hackathon MVP</span>
+        <button onclick="submitPrompt()" id="btn" class="px-5 py-2 rounded-lg bg-orange-500 text-black font-semibold text-sm">Generate Plan</button>
+      </div>
+    </div>
+    <div class="space-y-2">
+      <p class="text-xs text-zinc-500 uppercase">Examples</p>
+      <div class="flex flex-wrap gap-2">
+        ${examples.map((e,i)=>`<button onclick="document.getElementById('prompt').value=examples[${i}]" class="text-sm px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 text-left">${e.slice(0,70)}…</button>`).join('')}
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-4 pt-6 border-t border-zinc-900 text-center">
+      <div><div class="text-2xl font-bold text-orange-500">&lt;2 min</div><div class="text-xs text-zinc-500">to first dataset</div></div>
+      <div><div class="text-2xl font-bold text-orange-500">100%</div><div class="text-xs text-zinc-500">source + confidence</div></div>
+      <div><div class="text-2xl font-bold text-orange-500">0 lines</div><div class="text-xs text-zinc-500">scraper code</div></div>
+    </div>
+  </div>`;
+}
+async function submitPrompt(){
+  const p=document.getElementById('prompt').value.trim(); if(!p) return;
+  document.getElementById('btn').textContent='Planning…';
+  try{
+    const r=await fetch('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})});
+    plan=await r.json(); renderPlanner();
+  }catch(e){alert(e)} finally{document.getElementById('btn').textContent='Generate Plan'}
+}
+function renderPlanner(){
+  const i=plan.structured_intent, d=plan.dag, e=plan.estimate;
+  document.getElementById('app').innerHTML=`
+  <div class="space-y-6">
+    <div class="flex justify-between flex-wrap gap-4">
+      <div><h2 class="text-2xl font-bold">Workflow Plan</h2><p class="text-zinc-400 text-sm">Transparent AI planning</p></div>
+      <div class="flex gap-2">
+        <button onclick="run(true)" class="px-4 py-2 rounded-lg border border-zinc-700 text-sm">Sandbox Dry-Run</button>
+        <button onclick="run(false)" class="px-5 py-2 rounded-lg bg-orange-500 text-black font-semibold text-sm">Approve & Run</button>
+      </div>
+    </div>
+    <div class="bg-[#141416] border border-zinc-800 rounded-xl p-5">
+      <div class="grid sm:grid-cols-4 gap-4 text-sm">
+        <div><span class="text-zinc-500">Entity</span><p class="font-mono text-orange-400">${i.entity_type}</p></div>
+        <div><span class="text-zinc-500">Limit</span><p class="font-mono">${i.limit}</p></div>
+        <div><span class="text-zinc-500">Sources</span><p class="font-mono text-xs">${(i.preferred_sources||[]).join(', ')}</p></div>
+        <div><span class="text-zinc-500">Est.</span><p class="font-mono">~${e?.estimated_seconds}s · $${e?.estimated_cost_usd}</p></div>
+      </div>
+      <p class="mt-3 pt-3 border-t border-zinc-800 text-sm text-zinc-400">Fields: <span class="font-mono text-zinc-200">${(i.required_fields||[]).join(' · ')}</span></p>
+    </div>
+    <div class="bg-[#141416] border border-zinc-800 rounded-xl p-5">
+      <h3 class="text-sm text-zinc-400 mb-4">Execution DAG</h3>
+      <div class="flex flex-wrap items-center gap-2">
+        ${(d.nodes||[]).map((n,idx)=>`<div class="px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-700"><div class="text-xs text-orange-400 uppercase">${n.type}</div><div class="text-sm">${n.label}</div><div class="text-xs text-zinc-500">${n.estimated_time_sec}s</div></div>${idx<d.nodes.length-1?'<span class="text-zinc-600">→</span>':''}`).join('')}
+      </div>
+      <p class="text-xs text-zinc-500 mt-4">● Compliance: allowlist + robots.txt enforced</p>
+    </div>
+    <button onclick="showHome()" class="text-sm text-zinc-500">← Back</button>
+  </div>`;
+}
+async function run(dry){
+  const r=await fetch(`/api/workflows/${plan.workflow_id}/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:dry})});
+  const data=await r.json();
+  if(dry){alert(data.message);return;}
+  task={id:data.task_run_id,status:'queued',progress:0,logs:[]};
+  renderTask(); poll(data.task_run_id);
+}
+function renderTask(){
+  document.getElementById('app').innerHTML=`
+  <div class="max-w-2xl mx-auto space-y-6">
+    <h2 class="text-2xl font-bold">Task Running</h2>
+    <div class="bg-[#141416] border border-zinc-800 rounded-xl p-6 space-y-4">
+      <div class="flex justify-between text-sm"><span class="text-zinc-400">Status</span><span id="st" class="font-mono text-orange-400">queued</span></div>
+      <div><div class="flex justify-between text-xs text-zinc-500 mb-1"><span>Progress</span><span id="pr">0%</span></div>
+      <div class="h-2 bg-zinc-900 rounded-full"><div id="bar" class="h-full bg-orange-500" style="width:0%"></div></div></div>
+      <p id="rc" class="text-sm"></p>
+      <div id="lg" class="bg-black/40 rounded-lg p-3 max-h-48 overflow-y-auto font-mono text-xs"></div>
+      <button id="ex" style="display:none" onclick="loadRecs()" class="w-full py-2.5 rounded-lg bg-orange-500 text-black font-semibold text-sm">Explore Results →</button>
+    </div>
+  </div>`;
+}
+function poll(id){
+  const iv=setInterval(async()=>{
+    const r=await fetch(`/api/tasks/${id}`); task=await r.json();
+    document.getElementById('st').textContent=task.status;
+    document.getElementById('st').className='font-mono '+(task.status==='completed'?'text-green-400':task.status==='failed'?'text-red-400':'text-orange-400');
+    document.getElementById('pr').textContent=Math.round(task.progress||0)+'%';
+    document.getElementById('bar').style.width=(task.progress||0)+'%';
+    if(task.records_collected) document.getElementById('rc').innerHTML=`Collected <strong class="text-orange-400">${task.records_collected}</strong> records`;
+    document.getElementById('lg').innerHTML=(task.logs||[]).map(l=>`<div class="text-zinc-400"><span class="text-zinc-600">${(l.ts||'').slice(11,19)}</span> ${l.msg}</div>`).join('');
+    if(task.status==='completed'||task.status==='failed'){clearInterval(iv); if(task.status==='completed') document.getElementById('ex').style.display='block';}
+  },700);
+}
+async function loadRecs(){
+  const r=await fetch(`/api/datasets/${plan.workflow_id}/records?limit=100`);
+  const d=await r.json(); records=d.records||[]; renderResults();
+}
+function renderResults(){
+  const keys=records[0]?Object.keys(records[0]).filter(k=>!['id','entity_type','confidence_score','dedup_cluster_id','created_at'].includes(k)).slice(0,6):[];
+  document.getElementById('app').innerHTML=`
+  <div class="space-y-4">
+    <div class="flex justify-between flex-wrap gap-3">
+      <div><h2 class="text-2xl font-bold">Results Explorer</h2><p class="text-zinc-400 text-sm">${records.length} source-backed records</p></div>
+      <div class="flex gap-2">
+        <button onclick="exp('csv')" class="px-3 py-1.5 rounded-lg border border-zinc-700 text-sm">CSV</button>
+        <button onclick="exp('json')" class="px-3 py-1.5 rounded-lg border border-zinc-700 text-sm">JSON</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto rounded-xl border border-zinc-800">
+      <table class="w-full text-sm">
+        <thead class="bg-zinc-900 text-zinc-400"><tr><th class="px-4 py-3">#</th>${keys.map(k=>`<th class="px-4 py-3 capitalize">${k.replace(/_/g,' ')}</th>`).join('')}<th class="px-4 py-3">Conf</th></tr></thead>
+        <tbody>${records.map(r=>`<tr class="border-t border-zinc-800 hover:bg-zinc-900/50">
+          <td class="px-4 py-2 text-zinc-500 font-mono text-xs">${r.id}</td>
+          ${keys.map(k=>{const v=r[k]; return typeof v==='string'&&v.startsWith('http')?`<td class="px-4 py-2"><a href="${v}" target="_blank" class="text-orange-400">link</a></td>`:`<td class="px-4 py-2 max-w-[160px] truncate">${v??''}</td>`;}).join('')}
+          <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-mono ${(r.confidence_score||0)>=0.9?'bg-green-950 text-green-400':'bg-yellow-950 text-yellow-400'}">${((r.confidence_score||0)*100).toFixed(0)}%</span></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <button onclick="showHome()" class="text-sm text-zinc-500">← New prompt</button>
+  </div>`;
+}
+async function exp(fmt){
+  const r=await fetch(`/api/datasets/${plan.workflow_id}/export?format=${fmt}`,{method:'POST'});
+  const d=await r.json();
+  const blob=new Blob([fmt==='csv'?d.content:JSON.stringify(d.content,null,2)],{type:fmt==='csv'?'text/csv':'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fmt==='csv'?d.filename||'export.csv':`dataforge_${plan.workflow_id}.json`; a.click();
+}
+async function loadHistory(){
+  const r=await fetch('/api/workflows'); const h=await r.json();
+  document.getElementById('app').innerHTML=`
+  <div class="space-y-4"><h2 class="text-2xl font-bold">Workflow History</h2>
+  <div class="space-y-2">${h.length? h.map(w=>`<div class="flex justify-between p-4 rounded-xl bg-[#141416] border border-zinc-800 cursor-pointer" onclick="${w.status==='completed'?`plan={workflow_id:${w.id}};loadRecs()`:''}">
+    <div><p class="text-sm">${w.prompt_text}</p><p class="text-xs text-zinc-500">${w.entity_type||''} · ${(w.created_at||'').slice(0,19)}</p></div>
+    <span class="text-xs px-2 py-1 rounded font-mono ${w.status==='completed'?'bg-green-950 text-green-400':'bg-zinc-800 text-zinc-400'}">${w.status}</span>
+  </div>`).join('') : '<p class="text-zinc-500">No workflows yet</p>'}</div></div>`;
+}
+showHome();
+</script>
+</body>
+</html>
