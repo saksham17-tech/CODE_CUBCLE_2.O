@@ -212,3 +212,133 @@ async def get_allowlist(db: AsyncSession = Depends(get_db)):
         "permitted": list(PERMITTED_SOURCES.keys()),
         "tracked": [{"domain": s.domain, "type": s.type, "trust_score": s.trust_score, "robots_allowed": s.robots_allowed} for s in sources]
     }
+
+
+# ---------- Watchtower monitors ----------
+class MonitorRequest(BaseModel):
+    workflow_id: int
+    schedule: str = "daily"  # hourly | daily | weekly
+    alert_channel: str = "email"  # email | slack | webhook
+
+@router.post("/monitors")
+async def create_monitor(req: MonitorRequest, db: AsyncSession = Depends(get_db)):
+    """Promote a workflow to a recurring Watchtower monitor."""
+    wf = await db.get(Workflow, req.workflow_id)
+    if not wf:
+        raise HTTPException(404, "Workflow not found")
+    wf.is_monitor = True
+    wf.schedule = req.schedule
+    await db.commit()
+    return {
+        "monitor_id": wf.id,
+        "workflow_id": wf.id,
+        "schedule": req.schedule,
+        "alert_channel": req.alert_channel,
+        "status": "active",
+        "message": f"Watchtower monitor active — will re-run {req.schedule} and alert via {req.alert_channel}",
+    }
+
+@router.get("/monitors")
+async def list_monitors(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Workflow).where(Workflow.is_monitor == True))
+    rows = result.scalars().all()
+    return [
+        {
+            "monitor_id": w.id,
+            "prompt_text": w.prompt_text,
+            "schedule": w.schedule,
+            "status": w.status,
+            "entity_type": (w.structured_intent or {}).get("entity_type"),
+            "created_at": w.created_at.isoformat() if w.created_at else None,
+        }
+        for w in rows
+    ]
+
+# ---------- Chat-with-your-data ----------
+class ChatRequest(BaseModel):
+    question: str
+
+@router.post("/datasets/{workflow_id}/chat")
+async def chat_with_data(workflow_id: int, req: ChatRequest, db: AsyncSession = Depends(get_db)):
+    """Simple NL Q&A over collected records (rule-based RAG for MVP)."""
+    result = await db.execute(select(Record).where(Record.workflow_id == workflow_id).limit(200))
+    records = result.scalars().all()
+    if not records:
+        return {"answer": "No records found for this dataset.", "citations": []}
+
+    q = (req.question or "").lower().strip()
+    rows = [{"id": r.id, **(r.field_values or {}), "confidence": r.confidence_score} for r in records]
+
+    # Keyword filter
+    keywords = [w for w in q.replace("?", "").split() if len(w) > 2 and w not in {
+        "the", "and", "for", "with", "from", "that", "this", "what", "which", "where",
+        "how", "many", "show", "list", "find", "get", "are", "was", "were", "have", "has"
+    }]
+    matched = []
+    for row in rows:
+        blob = " ".join(str(v).lower() for v in row.values())
+        score = sum(1 for k in keywords if k in blob)
+        if score > 0 or not keywords:
+            matched.append((score, row))
+    matched.sort(key=lambda x: -x[0])
+    top = [m[1] for m in matched[:8]]
+
+    # Aggregate answers
+    if any(w in q for w in ["how many", "count", "number of"]):
+        answer = f"There are **{len(records)}** records in this dataset."
+        if keywords:
+            answer += f" Matching your filters ({', '.join(keywords)}): **{len(matched)}**."
+    elif any(w in q for w in ["location", "city", "where"]):
+        locs = {}
+        for r in rows:
+            loc = r.get("location") or "Unknown"
+            locs[loc] = locs.get(loc, 0) + 1
+        parts = [f"{k} ({v})" for k, v in sorted(locs.items(), key=lambda x: -x[1])]
+        answer = "Locations breakdown: " + ", ".join(parts)
+    elif any(w in q for w in ["company", "companies"]):
+        cos = {}
+        for r in rows:
+            c = r.get("company") or r.get("company_name") or "Unknown"
+            cos[c] = cos.get(c, 0) + 1
+        top_cos = sorted(cos.items(), key=lambda x: -x[1])[:10]
+        answer = "Companies: " + ", ".join(f"{k} ({v})" for k, v in top_cos)
+    elif any(w in q for w in ["title", "role", "position"]):
+        titles = {}
+        for r in rows:
+            t = r.get("title") or "Unknown"
+            titles[t] = titles.get(t, 0) + 1
+        top_t = sorted(titles.items(), key=lambda x: -x[1])[:10]
+        answer = "Roles: " + ", ".join(f"{k} ({v})" for k, v in top_t)
+    elif top:
+        sample = top[0]
+        fields = {k: v for k, v in sample.items() if k not in ("id", "confidence") and v}
+        answer = f"Found {len(matched)} matching record(s). Example: " + ", ".join(f"{k}={v}" for k, v in list(fields.items())[:6])
+    else:
+        answer = f"Dataset has {len(records)} records. Try asking about companies, locations, roles, or counts."
+
+    citations = [{"record_id": t["id"], "snippet": {k: t.get(k) for k in list(t)[:5]}} for t in top[:3]]
+    return {"answer": answer, "citations": citations, "matched_count": len(matched), "total_records": len(records)}
+
+
+@router.get("/datasets/{workflow_id}/insights")
+async def dataset_insights(workflow_id: int, db: AsyncSession = Depends(get_db)):
+    """Auto-generated summary stats for a dataset."""
+    result = await db.execute(select(Record).where(Record.workflow_id == workflow_id).limit(500))
+    records = result.scalars().all()
+    if not records:
+        return {"total": 0, "insights": []}
+    rows = [r.field_values or {} for r in records]
+    insights = [{"type": "count", "label": "Total records", "value": len(rows)}]
+    confs = [r.confidence_score for r in records if r.confidence_score is not None]
+    if confs:
+        insights.append({"type": "metric", "label": "Avg confidence", "value": f"{sum(confs)/len(confs)*100:.0f}%"})
+    for field in ["location", "company", "company_name", "title", "industry", "topic", "source"]:
+        counts = {}
+        for row in rows:
+            v = row.get(field)
+            if v:
+                counts[str(v)] = counts.get(str(v), 0) + 1
+        if counts:
+            top = sorted(counts.items(), key=lambda x: -x[1])[:5]
+            insights.append({"type": "breakdown", "label": field.replace("_", " ").title(), "value": top})
+    return {"total": len(rows), "insights": insights}

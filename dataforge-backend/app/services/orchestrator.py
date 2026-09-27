@@ -36,7 +36,6 @@ async def run_workflow(db: AsyncSession, workflow_id: int, task_run_id: int) -> 
             await db.commit()
         
         await log("Compliance check: verifying sources against allowlist + robots.txt", 5)
-        await asyncio.sleep(0.15)
         
         # Ensure sources exist
         for src_name in intent.get("preferred_sources", []):
@@ -54,22 +53,18 @@ async def run_workflow(db: AsyncSession, workflow_id: int, task_run_id: int) -> 
         await db.commit()
         
         await log("Discovering candidate pages...", 15)
-        await asyncio.sleep(0.15)
         
         await log("Extracting structured fields from permitted sources...", 35)
         raw_records = await collect_data(intent, limit=intent.get("limit", 20))
-        await asyncio.sleep(0.15)
         
         await log(f"Collected {len(raw_records)} raw records. Running validation...", 55)
         # Filter low confidence
         validated = [r for r in raw_records if r.get("_confidence", 0.9) >= 0.6]
         for r in validated:
             r["confidence_score"] = r.pop("_confidence", 0.9)
-        await asyncio.sleep(0.15)
         
         await log("Deduplicating across sources (embedding similarity)...", 70)
         unique = deduplicate(validated)
-        await asyncio.sleep(0.15)
         
         await log(f"Storing {len(unique)} canonical records with full lineage...", 85)
         

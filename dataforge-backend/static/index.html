@@ -24,9 +24,14 @@
 <footer class="border-t border-zinc-900 py-4 text-center text-xs text-zinc-600">DataForge AI · Hackathon MVP · Source-backed · Compliance by design</footer>
 <script>
 const examples = [
-  "Collect all Senior Data Engineer openings in Bengaluru posted this week across permitted job boards.",
-  "Find 15 mid-size SaaS companies in India that raised funding in the last 6 months, with founder LinkedIn and company email.",
-  "Find companies that sponsored fintech conferences in the last year, with contact details."
+  "Find all job openings for Data Science role in Noida region",
+  "Collect Senior Backend Engineer jobs in Mumbai posted this week",
+  "Find 10 mid-size SaaS companies in India that raised funding",
+  "Find me 20 most viral articles for JEE",
+  "Find companies that sponsored fintech conferences last year",
+  "Top AI tools and products on Product Hunt",
+  "Popular open source GitHub repositories for machine learning",
+  "Compare pricing for Notion, Figma, Slack and Vercel"
 ];
 let plan=null, task=null, records=[];
 function showHome(){
@@ -129,31 +134,85 @@ function poll(id){
 }
 async function loadRecs(){
   const r=await fetch(`/api/datasets/${plan.workflow_id}/records?limit=100`);
-  const d=await r.json(); records=d.records||[]; renderResults();
+  const d=await r.json(); records=d.records||[]; renderResults(); setTimeout(loadInsights, 50);
 }
 function renderResults(){
-  const keys=records[0]?Object.keys(records[0]).filter(k=>!['id','entity_type','confidence_score','dedup_cluster_id','created_at'].includes(k)).slice(0,6):[];
+  const keys=records[0]?Object.keys(records[0]).filter(k=>!['id','entity_type','confidence_score','dedup_cluster_id','created_at','company_careers'].includes(k)).slice(0,6):[];
   document.getElementById('app').innerHTML=`
   <div class="space-y-4">
     <div class="flex justify-between flex-wrap gap-3">
       <div><h2 class="text-2xl font-bold">Results Explorer</h2><p class="text-zinc-400 text-sm">${records.length} source-backed records</p></div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="promoteMonitor()" class="px-3 py-1.5 rounded-lg border border-orange-700/50 text-orange-400 text-sm hover:bg-orange-950/40">⏱ Watchtower</button>
         <button onclick="exp('csv')" class="px-3 py-1.5 rounded-lg border border-zinc-700 text-sm">CSV</button>
         <button onclick="exp('json')" class="px-3 py-1.5 rounded-lg border border-zinc-700 text-sm">JSON</button>
       </div>
     </div>
+
+    <div id="insightsBox" class="mb-2"></div>
+    <!-- Chat with data -->
+    <div class="bg-[#141416] border border-zinc-800 rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-sm font-medium text-orange-400">Chat with your data</span>
+        <span class="text-xs text-zinc-500">Ask about companies, locations, roles, counts…</span>
+      </div>
+      <div class="flex gap-2">
+        <input id="chatQ" type="text" placeholder="e.g. How many roles in Noida? Which companies?"
+          class="flex-1 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm focus:outline-none focus:border-orange-500"
+          onkeydown="if(event.key==='Enter')askChat()"/>
+        <button onclick="askChat()" class="px-4 py-2 rounded-lg bg-orange-500 text-black font-semibold text-sm">Ask</button>
+      </div>
+      <div id="chatA" class="mt-3 text-sm text-zinc-300 hidden"></div>
+    </div>
+
     <div class="overflow-x-auto rounded-xl border border-zinc-800">
       <table class="w-full text-sm">
         <thead class="bg-zinc-900 text-zinc-400"><tr><th class="px-4 py-3">#</th>${keys.map(k=>`<th class="px-4 py-3 capitalize">${k.replace(/_/g,' ')}</th>`).join('')}<th class="px-4 py-3">Conf</th></tr></thead>
         <tbody>${records.map(r=>`<tr class="border-t border-zinc-800 hover:bg-zinc-900/50">
           <td class="px-4 py-2 text-zinc-500 font-mono text-xs">${r.id}</td>
-          ${keys.map(k=>{const v=r[k]; return typeof v==='string'&&v.startsWith('http')?`<td class="px-4 py-2"><a href="${v}" target="_blank" class="text-orange-400">link</a></td>`:`<td class="px-4 py-2 max-w-[160px] truncate">${v??''}</td>`;}).join('')}
+          ${keys.map(k=>{const v=r[k]; return typeof v==='string'&&v.startsWith('http')?`<td class="px-4 py-2"><a href="${v}" target="_blank" rel="noopener" class="text-orange-400 hover:underline">link</a></td>`:`<td class="px-4 py-2 max-w-[160px] truncate">${v??''}</td>`;}).join('')}
           <td class="px-4 py-2"><span class="px-2 py-0.5 rounded text-xs font-mono ${(r.confidence_score||0)>=0.9?'bg-green-950 text-green-400':'bg-yellow-950 text-yellow-400'}">${((r.confidence_score||0)*100).toFixed(0)}%</span></td>
         </tr>`).join('')}</tbody>
       </table>
     </div>
     <button onclick="showHome()" class="text-sm text-zinc-500">← New prompt</button>
   </div>`;
+}
+async function loadInsights(){
+  if(!plan) return;
+  try{
+    const r=await fetch(`/api/datasets/${plan.workflow_id}/insights`);
+    const d=await r.json();
+    const el=document.getElementById('insightsBox');
+    if(!el) return;
+    if(!d.insights||!d.insights.length){el.innerHTML='';return;}
+    el.innerHTML='<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">'+d.insights.map(ins=>{
+      if(ins.type==='breakdown'&&Array.isArray(ins.value)){
+        return `<div class="bg-zinc-900 rounded-lg p-3 border border-zinc-800"><div class="text-xs text-zinc-500 mb-1">${ins.label}</div><div class="text-sm">${ins.value.map(([k,v])=>`<span class="inline-block mr-2 mb-1 px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">${k} <b class="text-orange-400">${v}</b></span>`).join('')}</div></div>`;
+      }
+      return `<div class="bg-zinc-900 rounded-lg p-3 border border-zinc-800"><div class="text-xs text-zinc-500">${ins.label}</div><div class="text-lg font-semibold text-orange-400">${ins.value}</div></div>`;
+    }).join('')+'</div>';
+  }catch(e){}
+}
+async function askChat(){
+  const q=document.getElementById('chatQ').value.trim();
+  if(!q||!plan) return;
+  const box=document.getElementById('chatA');
+  box.classList.remove('hidden');
+  box.innerHTML='<span class="text-zinc-500">Thinking…</span>';
+  try{
+    const r=await fetch(`/api/datasets/${plan.workflow_id}/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+    const d=await r.json();
+    box.innerHTML=`<div class="text-zinc-200">${d.answer}</div>`+(d.matched_count!=null?`<div class="text-xs text-zinc-500 mt-1">${d.matched_count} matched / ${d.total_records} total</div>`:'');
+  }catch(e){box.innerHTML='<span class="text-red-400">Chat failed</span>';}
+}
+async function promoteMonitor(){
+  if(!plan) return;
+  try{
+    const r=await fetch('/api/monitors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflow_id:plan.workflow_id,schedule:'daily',alert_channel:'email'})});
+    const d=await r.json();
+    alert(d.message||'Monitor created');
+  }catch(e){alert('Failed to create monitor');}
 }
 async function exp(fmt){
   const r=await fetch(`/api/datasets/${plan.workflow_id}/export?format=${fmt}`,{method:'POST'});
